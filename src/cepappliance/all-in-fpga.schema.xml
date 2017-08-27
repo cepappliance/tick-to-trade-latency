@@ -1,0 +1,76 @@
+<schema name="all-in-fpga">
+    <!-- Global variables, types and constants -->
+    <global>
+        <!-- Financial instruments definition -->
+        <instruments>
+            <instrument name='i_main' symbol='USD000UTSTOM' session='CETS' maxpricelevels='1000' />
+            <!-- <instrument name='i_hedge' symbol='USD000000TOD' session='CETS' maxpricelevels='1000' /> -->
+        </instruments>
+        
+        <!-- A single price level of the Order Book -->
+        <type name='PriceLevel' def='tuple &lt; money price, uint64 size &gt;' />
+        
+        <constant name='SIDE_BUY' type='uint64' value="1" />
+        <constant name='SIDE_SELL' type='uint64' value="2" />
+        <constant name='ACC_TRADE' type='string(32)' value="'ABCDE'" />
+        <constant name='ACC_CLIENT' type='string(32)' value="'OPQRSTUVWXYZ'" />
+
+        <variable name='LotSize' type='uint64' value="50" />
+        <!-- variable name='LastID' type='uint64' value="1200000" /-->
+    </global>
+    <!-- Market data fields we need -->
+    <input from='moex-fx-fast-orderlog' as='orderlog'>
+        <accept message='X-OLR-CURR' />
+        <sequence name='GroupMDEntries'>
+            <field name='MDUpdateAction' type='uint64' />
+            <field name='MDEntryType' type='string(1)' />
+            <field name='MDEntryID' type='string(16)' />
+            <field name='Symbol' type='string(16)' />
+            <field name='MDEntryPx' type='money' />
+            <field name='MDEntrySize' type='uint64' />
+            <field name='TradingSessionID' type='string(8)' />
+        </sequence>
+    </input>
+    <!-- The Order Book -->
+    <book orders='orderlog' as='fxbook'>
+        <!-- <accept instruments='i_main, i_hedge' /> -->
+        <accept instruments='i_main' />
+        <field name='instrument' type='uint64' />
+        <field name='time' type='uint64' />
+        <field name='book' type='tuple &lt; PriceLevel bid, PriceLevel ask &gt;[ 16 ]' /> <!-- &lt; &gt; - yeh, XML :| -->
+    </book>
+    <!-- Clculate buy price (just take best sell price from the Order Book) -->
+    <map stream="fxbook in" as="algo out" >
+        <field name="price" type="money" expression="in.book[0].ask.price" />
+        <field name="size" type="uint64" expression="in.book[0].ask.size" />
+    </map>
+    <!-- Create FIX message with the buy order -->
+    <map stream='algo in' as='fix out'>
+        <field name='Account' type='string(12)' expression="ACC_CLIENT" />
+        <field name='ClOrdID' type='string(20)' expression="''" />
+        <field name='HandlInst' type='string(1)' expression="'1'" />
+        <field name='OrderQty' type='uint64' expression="in.size" />
+        <field name='OrdType' type='string(1)' expression="'2'" />
+        <field name='Price' type='money' expression="in.price" />
+        <field name='Side' type='uint64' expression="SIDE_BUY" />
+        <field name='Symbol' type='string(12)' expression="'USD000UTSTOM'" />
+        <field name='TransactTime' type='string(17)' expression="''" />
+        <field name='NoTradingSessions' type='uint64' expression="1" />
+        <field name='TradingSessionID' type='string(4)' expression="'CETS'" />
+        <field name='NoPartyIDs' type='uint64' expression="1" />
+        <field name='PartyID' type='string(12)' expression="ACC_TRADE" />
+        <field name='PartyIDSource' type='string(1)' expression="'D'" />
+        <field name='PartyRole' type='uint64' expression="3" />
+        <field name='SecondaryClOrdID' type='string(12)' expression="'8'" />
+        <program><![CDATA[
+            // Do not care about uniqueness of the order ID for now...
+            // LastID = LastID + 1;
+            out.ClOrdID = ACC_TRADE + '//' + '120000'; // + string(?)(LastID);
+            // 19700101-00:00:00 is a valid value for TransacTime thus do not slow the processing down
+            out.TransactTime = '19700101-00:00:00';// string(17)(nanoTime()-1000000000,'yyyyMMdd-HH:mm:ss');
+        ]]></program>
+    </map>
+    <output stream="fix" to="moex-fx-fix" >
+        <as message="NewOrderSingle" />
+    </output>
+</schema>
