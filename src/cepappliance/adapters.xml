@@ -1,6 +1,6 @@
 <adapters>
     <!-- FAST adapter for market data -->
-    <fast name="moex-fx-fast-orderlog">
+    <fast name="moex-fx-fast-orderlog" templates="FIX50SP2-2017-Mar.xml"> <!-- FAST templates for MOEX ASTS -->
         <accept over="udp">
             <on port="16001"> <!-- Just one feed for testing. Up to 4 feeds are supported. -->
                 <multicast group='192.168.200.2'> <!-- IP-address of CEPappliance -->
@@ -9,7 +9,6 @@
             </on>
         </accept>
         <trading venue='moex' market='fx' />
-        <templates uri='FIX50SP2-2017-Mar.xml' /> <!-- FAST templates for MOEX ASTS -->
     </fast>
     <!-- FIX adapter to send orders out to MOEX -->
     <fix name="moex-fx-fix" version="FIX.4.4">
