@@ -44,6 +44,8 @@
         <field name="time"                  type="uint64" />
         <field name="book"                  type="tuple &lt; PriceLevel bid, PriceLevel ask &gt;[ 16 ]" /> <!-- &lt; &gt; - yeh, XML :| -->
     </book>
+    <!-- Clculate buy price (just take best bid price from the Order Book) -->
+    <!-- Create FIX message with the buy order -->
     <wire streams='fxbook 1'>
         <out as='fix out'>
             <field name='ClOrdID' type='uint' />
