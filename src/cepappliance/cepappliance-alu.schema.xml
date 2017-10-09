@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+    Copyright 2017 CEPappliance, Inc.
+-->
+
+<schema name="all-in-fpga">
+    <!-- Global variables, types and constants -->
+    <global>
+        <!-- Financial instruments definition -->
+        <instruments>
+            <instrument name="i_main" symbol="USD000UTSTOM" session="CETS" maxpricelevels="1000" />
+        </instruments>
+        
+        <!-- A single price level of the Order Book -->
+        <type name="PriceLevel" def="tuple &lt; money price, uint64 size &gt;" />
+        
+        <constant name="SIDE_BUY"           type="uint64"       value="1" />
+        <constant name="SIDE_SELL"          type="uint64"       value="2" />
+        <constant name="ACC_TRADE"          type="string(32)"   value="'ABCDE'" />
+        <constant name="ACC_CLIENT"         type="string(32)"   value="'OPQRSTUVWXYZ'" />
+        <variable name="LotSize"            type="uint64"       value="50" />
+
+        <variable name='orderID'            type='uint64'       value="1200000" />
+        <variable name='waterline'          type='money'        value="0" />
+    </global>
+    <!-- Market data fields we need -->
+    <input from="moex-fx-fast-orderlog" as="orderlog">
+        <accept message="X-OLR-CURR" />
+        <sequence name="GroupMDEntries">
+            <field name="MDUpdateAction"    type="uint64" />
+            <field name="MDEntryType"       type="string(1)" />
+            <field name="MDEntryID"         type="string(16)" />
+            <field name="Symbol"            type="string(16)" />
+            <field name="MDEntryPx"         type="money" />
+            <field name="MDEntrySize"       type="uint64" />
+            <field name="TradingSessionID"  type="string(8)" />
+        </sequence>
+    </input>
+    <!-- The Order Book -->
+    <book orders="orderlog" as="fxbook">
+        <!-- <accept instruments="i_main" /> -->
+        <accept instruments="i_main" />
+        <field name="instrument"            type="uint64" />
+        <field name="time"                  type="uint64" />
+        <field name="book"                  type="tuple &lt; PriceLevel bid, PriceLevel ask &gt;[ 16 ]" /> <!-- &lt; &gt; - yeh, XML :| -->
+    </book>
+    <!-- Clculate buy price (just take best bid price from the Order Book) -->
+    <map stream="fxbook in" as="algo out" >
+        <field name="price" type="money" expression="in.book[0].bid.price" />
+        <program>
+            money newWaterline = in.book[0].bid.price + in.book[0].ask.price;
+            if(newWaterline == waterline) {
+                skip; // do not send a new order
+            }
+            waterline = newWaterline;
+        </program>
+    </map>
+    <!-- Create FIX message with the buy order -->
+    <map stream="algo in" as="fix out">
+        <field name="ClOrdID"               type="uint" />
+        <!-- Type 'money' is a fixed point number wuth 5 fractional digits -->
+        <field name="Price"                 type="money"            expression="in.price" />
+        <program><![CDATA[
+            orderID = orderID + 1;
+            out.ClOrdID = orderID;
+        ]]></program>
+    </map>
+    <output stream="fix" to="moex-fx-fix" >
+        <as message="NewOrderSingle" />
+        <format field="MsgSeqNum"           as="%8d" />
+        <format field="Account"             as="{ACC_CLIENT}" />
+        <format field="ClOrdID"             as="{ACC_TRADE}//%6d" />
+        <format field="HandlInst"           as="1" />
+        <format field="OrderQty"            as="1" />
+        <format field="OrdType"             as="2" />
+         <!-- Price will be padded with '0' on the left side if formatted value takes less than 8 chars including '.' -->
+         <!-- Formated value of 'money' type always has 5 digits after '.' -->
+        <format field='Price'               as="%8m" />
+        <format field='Side'                as="{SIDE_SELL}" />
+        <format field='Symbol'              as="USD000UTSTOM" />
+        <format field='TransactTime'        as="20170502-17:20:50" />
+        <format field='NoTradingSessions'   as="1" />
+        <format field='TradingSessionID'    as="CETS" />
+        <format field='NoPartyIDs'          as="1" />
+        <format field='PartyID'             as="{ACC_TRADE}" />
+        <format field='PartyIDSource'       as="D" />
+        <format field='PartyRole'           as="3" />
+        <format field='SecondaryClOrdID'    as="8" />
+    </output>
+</schema>
